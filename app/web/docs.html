@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Docs · imagenai-2api</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="logo">🎬</div>
+      <div>imagenai-2api<div class="sub">API Reference</div></div>
+    </div>
+    <div class="row">
+      <a href="/" class="badge">Console</a>
+      <a href="/health" class="badge">Health</a>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2>OpenAI-compatible image-to-video API</h2>
+    <p class="muted">This gateway exposes an OpenAI-style API for the Miricanvas image-to-video model. Authentication uses an API key (create one in the console). All requests and responses are JSON.</p>
+    <table>
+      <tr><th>Base URL</th><td class="mono" id="base">-</td></tr>
+      <tr><th>Model</th><td class="mono">miricanvas-image-to-video</td></tr>
+      <tr><th>Auth header</th><td class="mono">Authorization: Bearer &lt;api-key&gt;</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>POST /v1/video/generations <span class="hint">submit a job</span></h2>
+    <p class="muted">Accepts a source image and a motion prompt. Returns a task immediately; the video is produced asynchronously.</p>
+    <p class="muted">Request body</p>
+    <pre><code>{
+  "model": "miricanvas-image-to-video",
+  "prompt": "Slow camera push-in, gentle parallax, cinematic light",
+  "image": "https://example.com/photo.jpg"
+}</code></pre>
+    <p class="muted mt">The <code>image</code> field also accepts a raw base64 string or a <code>data:image/...;base64,...</code> URL. <code>image_url</code>, <code>input_image</code> and <code>images[0]</code> are accepted as aliases.</p>
+    <p class="muted mt">Response</p>
+    <pre><code>{
+  "id": "3f1c…",
+  "status": "queued",
+  "progress": 0,
+  "video_url": null,
+  "error": null,
+  "created": 1710000000
+}</code></pre>
+    <p class="muted mt">curl</p>
+    <pre><code>curl -X POST "$BASE/v1/video/generations" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"gentle parallax","image":"https://example.com/photo.jpg"}'</code></pre>
+  </div>
+
+  <div class="card">
+    <h2>GET /v1/video/generations/{id} <span class="hint">poll a job</span></h2>
+    <p class="muted">Poll until <code>status</code> is <code>completed</code> (or <code>failed</code>). When complete, <code>video_url</code> holds the downloadable MP4.</p>
+    <pre><code>{
+  "id": "3f1c…",
+  "status": "completed",
+  "progress": 100,
+  "video_url": "https://…/output.mp4",
+  "error": null,
+  "created": 1710000000
+}</code></pre>
+    <p class="muted mt">curl</p>
+    <pre><code>curl "$BASE/v1/video/generations/3f1c…" \
+  -H "Authorization: Bearer $API_KEY"</code></pre>
+  </div>
+
+  <div class="card">
+    <h2>GET /v1/models <span class="hint">list models</span></h2>
+    <p class="muted">Public — no API key required.</p>
+    <pre><code>{
+  "object": "list",
+  "data": [{ "id": "miricanvas-image-to-video", "object": "model" }]
+}</code></pre>
+  </div>
+
+  <div class="card">
+    <h2>GET /health <span class="hint">service status</span></h2>
+    <p class="muted">Public health probe with live stats and device-ledger capacity.</p>
+    <pre><code>{
+  "status": "ok",
+  "requests": 12,
+  "tasks_completed": 9,
+  "errors": 1,
+  "devices": { "today_devices": 5, "remaining_today": 1, "…": "…" },
+  "version": "2.0.0"
+}</code></pre>
+  </div>
+
+  <p class="muted center">imagenai-2api · OpenAI-compatible image-to-video gateway</p>
+</div>
+<script>
+  document.getElementById('base').textContent = location.origin;
+</script>
+</body>
+</html>

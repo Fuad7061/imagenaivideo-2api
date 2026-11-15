@@ -1,0 +1,13 @@
+services:
+  imagenai-2api:
+    build: .
+    image: imagenai-2api:latest
+    container_name: imagenai-2api
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      PORT: "8765"
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data

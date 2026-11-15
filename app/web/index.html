@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Console · imagenai-2api</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="logo">🎬</div>
+      <div>imagenai-2api<div class="sub">Admin Console · <span id="ver">-</span></div></div>
+    </div>
+    <div class="row">
+      <a href="/docs" class="badge">API Docs</a>
+      <button class="ghost small" id="logout">Sign out</button>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="playground">Playground</button>
+    <button data-tab="keys">API Keys</button>
+    <button data-tab="settings">Settings</button>
+    <button data-tab="password">Password</button>
+  </div>
+
+  <!-- Overview -->
+  <section id="tab-overview">
+    <div class="grid cols" id="stats"></div>
+    <div class="card mt">
+      <div class="row between">
+        <h2>Device Ledger <span class="hint">auto-rotate on daily limit</span></h2>
+        <div class="row">
+          <span class="badge" id="pool-badge">-</span>
+          <button class="ghost small" id="newdevice">New device</button>
+        </div>
+      </div>
+      <div class="mt" style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Device ID</th><th>Used today</th><th>Remaining</th><th>Reason</th><th>State</th></tr></thead>
+          <tbody id="device-body"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="muted mt" style="font-size:12px">Each device fingerprint is limited to a fixed number of generations per day. When a device is exhausted the gateway silently rotates to a fresh fingerprint.</p>
+    </div>
+  </section>
+
+  <!-- Playground -->
+  <section id="tab-playground" class="hidden">
+    <div class="card">
+      <div class="row between">
+        <h2>Playground <span class="hint">image to video</span></h2>
+        <span class="badge" id="pg-elapsed">-</span>
+      </div>
+      <label>Source image</label>
+      <div class="row">
+        <input type="file" id="pg-file" accept="image/*" style="width:auto">
+        <button class="ghost small" id="pg-clear">Clear</button>
+      </div>
+      <label>…or image URL</label>
+      <input type="text" id="pg-url" placeholder="https://example.com/photo.jpg">
+      <label>…or paste raw base64</label>
+      <textarea id="pg-b64" rows="2" placeholder="data:image/png;base64,... or raw base64"></textarea>
+      <div class="row mt" id="pg-preview-row" style="display:none">
+        <img id="pg-preview" class="preview" alt="source preview">
+      </div>
+      <label>Prompt (motion / camera direction)</label>
+      <textarea id="pg-prompt" rows="3" placeholder="Slow camera push-in, gentle parallax, cinematic lighting"></textarea>
+      <div class="row mt">
+        <button id="pg-run">Generate video</button>
+        <span class="muted" style="font-size:12px">Video generation is asynchronous; this page polls until it is ready.</span>
+      </div>
+      <div id="pg-status" class="muted mt" style="font-size:13px"></div>
+      <div class="progress mt hidden" id="pg-progress"><span style="width:0%"></span></div>
+      <div id="pg-result" class="mt"></div>
+    </div>
+  </section>
+
+  <!-- API keys -->
+  <section id="tab-keys" class="hidden">
+    <div class="card">
+      <div class="row between">
+        <h2>API Keys <span class="hint">for /v1 authentication</span></h2>
+        <div class="row">
+          <label style="margin:0;display:flex;gap:8px;align-items:center">
+            <input type="checkbox" id="require-key" style="width:auto"> Require auth
+          </label>
+          <button class="small" id="new-key">Create key</button>
+        </div>
+      </div>
+      <div class="mt" style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Name</th><th>Key</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="keys-body"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="muted mt" style="font-size:12px">Note: a key is shown in full only when created — copy and save it right away.</p>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section id="tab-settings" class="hidden">
+    <div class="card">
+      <h2>Devices</h2>
+      <div class="grid cols">
+        <div><label>Daily limit per device</label><input type="number" id="devices.daily_limit"></div>
+        <div><label>Submit retries</label><input type="number" id="devices.submit_retries"></div>
+      </div>
+      <p class="muted mt" style="font-size:12px">Raising the daily limit reuses each fingerprint for more generations; the retry count controls how many fresh fingerprints are tried before a submit is reported as failed.</p>
+    </div>
+    <div class="card">
+      <h2>Upstream</h2>
+      <div class="grid cols">
+        <div><label>Upstream host</label><input type="text" id="upstream.host"></div>
+        <div><label>User-Agent</label><input type="text" id="upstream.user_agent"></div>
+        <div><label>Request timeout (s)</label><input type="number" id="upstream.timeout"></div>
+        <div><label>Poll timeout (s)</label><input type="number" id="upstream.poll_timeout"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Other</h2>
+      <div class="grid cols">
+        <div><label style="margin-top:26px"><input type="checkbox" id="docs_public" style="width:auto"> Public docs access</label></div>
+      </div>
+      <div class="row mt"><button id="save-settings">Save settings</button></div>
+    </div>
+  </section>
+
+  <!-- Password -->
+  <section id="tab-password" class="hidden">
+    <div class="card narrow" style="margin:0 auto">
+      <h2>Change admin password</h2>
+      <label>Current password</label><input type="password" id="pw-current">
+      <label>New password (min 6 characters)</label><input type="password" id="pw-new">
+      <label>Confirm new password</label><input type="password" id="pw-new2">
+      <button class="mt" id="save-pw" style="width:100%">Update password</button>
+      <p class="muted mt" style="font-size:12px">All active sessions will be invalidated and you will need to sign in again.</p>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+<script src="/assets/app.js"></script>
+<script src="/assets/dashboard.js"></script>
+</body>
+</html>
