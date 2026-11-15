@@ -85,6 +85,7 @@ button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 
 .badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
 .badge.ok { color: var(--ok); border-color: rgba(53,208,127,.4); }
+.badge.warn { color: var(--warn); border-color: rgba(255,176,32,.4); }
 .badge.err { color: var(--err); border-color: rgba(255,92,108,.4); }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }

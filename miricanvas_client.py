@@ -31,24 +31,61 @@ def _save_ledger(d):
 def _today(): return time.strftime("%Y-%m-%d")
 
 
+def _prune(d, today=None):
+    """账本按天滚动：只保留今天创建的设备（在调用方持锁时使用）。"""
+    today = today or _today()
+    for did in list(d.keys()):
+        if d[did].get("created") != today:
+            del d[did]
+    return d
+
+
 def mint_device():
-    """生成设备指纹但暂不写账本（供设备池预热，按需落账以省 IO）。"""
+    """生成设备指纹但不写账本（纯内存，零 IO）。"""
     return f"android-{uuid.uuid4().hex[:16]}"
+
+
+def record_device(did, reason="pool"):
+    """把一个已铸造的指纹记入今天的账本（used=0）。设备池用它在预热时落账。"""
+    with _lock:
+        d = _load_ledger(); today = _today()
+        _prune(d, today)
+        d[did] = {"created": today, "used": 0, "reason": reason}
+        _save_ledger(d)
+    return did
+
+
+def exhaust_device(did):
+    """把一个设备标记为当日配额用尽（供 429 后同步账本）。"""
+    with _lock:
+        d = _load_ledger(); today = _today()
+        _prune(d, today)
+        info = d.setdefault(did, {"created": today, "used": 0, "reason": "pool"})
+        info["used"] = DAILY_LIMIT
+        info["last_used"] = today
+        _save_ledger(d)
+    return did
+
+
+def forget_device(did):
+    """从账本中彻底删除一个设备（回收过期指纹）。"""
+    with _lock:
+        d = _load_ledger()
+        if d.pop(did, None) is not None:
+            _save_ledger(d)
+    return did
 
 
 def new_device(reason="fresh"):
     """生成新设备指纹并立即记入本地账本。网关侧可把 device_id 绑定到代理出口 IP。"""
-    did = mint_device()
-    with _lock:
-        d = _load_ledger(); d[did] = {"created": _today(), "used": 0, "reason": reason}
-        _save_ledger(d)
-    return did
+    return record_device(mint_device(), reason)
 
 
 def pick_device():
     """优先取今天还没用完配额的设备；没有就造新的。"""
     with _lock:
         d = _load_ledger(); today = _today()
+        _prune(d, today)
         for did, info in d.items():
             if info.get("used", 0) < DAILY_LIMIT and info.get("created") == today:
                 return did
@@ -60,10 +97,11 @@ def pick_device():
 
 def _mark_used(did):
     with _lock:
-        d = _load_ledger()
-        info = d.setdefault(did, {"created": _today(), "used": 0})
+        d = _load_ledger(); today = _today()
+        _prune(d, today)
+        info = d.setdefault(did, {"created": today, "used": 0})
         info["used"] = info.get("used", 0) + 1
-        info["last_used"] = _today()
+        info["last_used"] = today
         _save_ledger(d)
 
 
@@ -102,10 +140,15 @@ def health(proxy=None):
 
 
 def generate(image_b64: str, prompt: str, proxy=None, device_id=None, is_premium=False):
-    """提交图生视频。自动换设备直到成功（最多 5 次）。proxy 可传网关代理池取出的代理。"""
+    """提交图生视频。自动换设备直到成功（最多 5 次）。proxy 可传网关代理池取出的代理。
+
+    - 未指定 device_id：每次用全新独立设备（设备零成本），429 时自动换新。
+    - 指定 device_id（设备池托管）：429 时把该设备标记为当日用尽后立即返回，
+      由上层（网关）决定是否换用池中其它设备重试，避免产生游离设备。
+    """
     last = None
+    explicit = device_id is not None
     for _ in range(5):
-        # 并发安全：未指定设备时每次都用全新独立设备（设备零成本，无需复用）
         did = device_id or new_device("auto")
         body = json.dumps({"image_base64": image_b64, "prompt": prompt,
                            "device_id": did, "is_premium": is_premium, "cpm_tier": 0},
@@ -117,7 +160,10 @@ def generate(image_b64: str, prompt: str, proxy=None, device_id=None, is_premium
             return {"ok": True, "request_id": d["request_id"], "device": did,
                     "remaining": DAILY_LIMIT - (d.get("generations_used", 0) + 1)}
         last = {"ok": False, "http": st, "resp": resp.decode("utf-8", "replace")[:200]}
-        if st == 429:  # 该设备日限到顶 → 自动换新设备重试
+        if st == 429:  # 该设备日限到顶 → 同步账本后换设备
+            exhaust_device(did)
+            if explicit:
+                break
             device_id = None
             continue
         break

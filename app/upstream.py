@@ -61,6 +61,26 @@ def mint_device():
     return fn() if fn else _mc.new_device("pool")
 
 
+def record_device(device_id, reason="pool"):
+    """Persist an already-minted fingerprint to today's ledger with zero usage."""
+    return _mc.record_device(device_id, reason)
+
+
+def exhaust_device(device_id):
+    """Mark a device as having used up its daily quota in the ledger."""
+    return _mc.exhaust_device(device_id)
+
+
+def forget_device(device_id):
+    """Remove a device from the ledger entirely (recycle stale fingerprints)."""
+    return _mc.forget_device(device_id)
+
+
+def daily_limit():
+    """Current per-device daily limit (admin-configurable)."""
+    return int(getattr(_mc, "DAILY_LIMIT", 2))
+
+
 def ledger_summary():
     """Summarise the local device ledger for the dashboard."""
     today = _mc._today()

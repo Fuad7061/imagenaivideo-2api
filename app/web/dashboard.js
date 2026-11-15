@@ -32,12 +32,21 @@ function renderPool(p) {
   const items = [
     ['Ready', p.idle],
     ['In flight', p.inflight],
+    ['Exhausted', p.exhausted],
     ['Credits', p.credits],
     ['Pool size', p.size + '/' + p.target],
     ['Minted', p.minted],
   ];
   $('#pool-stats').innerHTML = items.map(([l, v]) =>
     `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
+}
+
+function stateBadge(state, remaining) {
+  const s = state || (remaining > 0 ? 'available' : 'exhausted');
+  if (s === 'in-flight') return '<span class="badge warn">in-flight</span>';
+  if (s === 'exhausted') return '<span class="badge err">exhausted</span>';
+  if (s === 'available') return '<span class="badge ok">available</span>';
+  return '<span class="badge">' + esc(s) + '</span>';
 }
 
 function renderDevices(d) {
@@ -47,7 +56,7 @@ function renderDevices(d) {
     <td>${x.used}</td>
     <td>${x.remaining}</td>
     <td>${esc(x.reason)}</td>
-    <td>${x.remaining > 0 ? '<span class="badge ok">available</span>' : '<span class="badge err">exhausted</span>'}</td>
+    <td>${stateBadge(x.state, x.remaining)}</td>
   </tr>`).join('');
   $('#device-body').innerHTML = rows || '<tr><td colspan="5" class="muted">No devices yet — one is created on the first generation.</td></tr>';
 }

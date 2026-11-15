@@ -120,6 +120,24 @@ class App:
                 out[f.name] = (STATIC_TYPES[f.suffix], f.read_bytes())
         return out
 
+    # ---- views ----
+    def devices_view(self):
+        """Merge live pool state into the ledger rows so both views agree."""
+        summary = upstream.ledger_summary()
+        states = {d["id"]: d["state"] for d in self.pool.snapshot().get("devices", [])}
+        for d in summary.get("devices", []):
+            state = states.get(d["id"])
+            if state is None:
+                state = "available" if d.get("remaining", 0) > 0 else "exhausted"
+            d["state"] = state
+        return summary
+
+    def _submit_retries(self):
+        try:
+            return max(1, int(self.config.get("devices", "submit_retries", default=5)))
+        except Exception:  # noqa: BLE001
+            return 5
+
     # ---- tasks ----
     def submit_task(self, body):
         prompt = (body.get("prompt") or "").strip()
@@ -133,18 +151,28 @@ class App:
         image_b64 = extract_b64(image)
 
         self.stats.inc("requests")
-        try:
-            device_id = self.pool.acquire()
-        except PoolEmpty as e:
+        retries = self._submit_retries()
+        result = None
+        last_err = None
+        for _ in range(retries):
+            try:
+                device_id = self.pool.acquire()
+            except PoolEmpty as e:
+                last_err = e
+                break
+            try:
+                result = upstream.submit(image_b64, prompt, device_id=device_id)
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                self.pool.release(device_id, used=False)
+                continue
+            self.pool.release(device_id, used=True)
+            break
+        if result is None:
             self.stats.inc("errors")
-            raise UpstreamError(str(e))
-        try:
-            result = upstream.submit(image_b64, prompt, device_id=device_id)
-        except Exception:
-            self.pool.release(device_id, used=False)
-            self.stats.inc("errors")
-            raise
-        self.pool.release(device_id, used=True)
+            if isinstance(last_err, PoolEmpty):
+                raise UpstreamError(str(last_err))
+            raise UpstreamError(f"upstream failed after {retries} attempt(s): {last_err}")
         tid = os.urandom(16).hex()
         task = {
             "id": tid,
@@ -373,7 +401,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._redirect("/login")
         if path == "/health":
             snap = self.app.stats.snapshot()
-            return self._json(200, {"status": "ok", **snap, "devices": upstream.ledger_summary(), "pool": self.app.pool.snapshot(), "version": __version__})
+            return self._json(200, {"status": "ok", **snap, "devices": self.app.devices_view(), "pool": self.app.pool.snapshot(), "version": __version__})
         if path.startswith("/assets/"):
             return self._static(path.rsplit("/", 1)[-1])
         if path == "/favicon.ico":
@@ -419,7 +447,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._is_admin():
             return self._json(401, {"error": "unauthorized"})
         if sub == "/config" and method == "GET":
-            return self._json(200, {"config": self.app.config.snapshot(), "stats": self.app.stats.snapshot(), "devices": upstream.ledger_summary(), "pool": self.app.pool.snapshot(), "version": __version__})
+            return self._json(200, {"config": self.app.config.snapshot(), "stats": self.app.stats.snapshot(), "devices": self.app.devices_view(), "pool": self.app.pool.snapshot(), "version": __version__})
         if sub == "/config" and method == "PUT":
             applied, errors = self.app.config.apply_settings(self._body())
             upstream.configure(self.app.config)
@@ -453,15 +481,15 @@ class Handler(BaseHTTPRequestHandler):
         if sub == "/pool/refill" and method == "POST":
             return self._json(200, {"ok": True, "pool": self.app.pool.refill()})
         if sub == "/devices" and method == "GET":
-            return self._json(200, upstream.ledger_summary())
+            return self._json(200, self.app.devices_view())
         if sub == "/devices/new" and method == "POST":
             try:
-                did = upstream.new_device("manual")
-                return self._json(200, {"ok": True, "device": did, "devices": upstream.ledger_summary()})
+                did = self.app.pool.add("manual")
+                return self._json(200, {"ok": True, "device": did, "devices": self.app.devices_view()})
             except Exception as e:  # noqa: BLE001
                 return self._json(500, {"error": str(e)})
         if sub == "/stats" and method == "GET":
-            return self._json(200, {"stats": self.app.stats.snapshot(), "devices": upstream.ledger_summary(), "pool": self.app.pool.snapshot()})
+            return self._json(200, {"stats": self.app.stats.snapshot(), "devices": self.app.devices_view(), "pool": self.app.pool.snapshot()})
         return self._json(404, {"error": "not found"})
 
     def _login(self):
@@ -528,6 +556,12 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
     request_queue_size = 128
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError, ConnectionAbortedError)):
+            return  # clients hanging up mid-keepalive is normal, not an error
+        super().handle_error(request, client_address)
 
 
 def run():
