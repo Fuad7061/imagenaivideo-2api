@@ -14,6 +14,9 @@ Pure Python standard library. No dependencies, no build step.
 - **Automatic device rotation** — each device fingerprint is limited to a fixed number of
   generations per day. When a fingerprint is exhausted the gateway silently rotates to a
   fresh one. No IP rate limiting (25 concurrent requests from one IP tested clean).
+- **Device pool** — a background thread keeps a set of fresh fingerprints pre-warmed so
+  requests start instantly. Idle fingerprints are recycled, minting is throttled to stay
+  light on CPU, and the pool doubles as a concurrency gate.
 - **Per-request proxy** — pass an HTTP/SOCKS proxy per request to rotate egress through a pool.
 - **Admin console** — dark-themed web UI: overview, playground, API keys, settings, password.
 - **API keys** — OpenAI-style `Authorization: Bearer sk-ig-…` auth on `/v1`, toggleable.
@@ -65,8 +68,30 @@ The device ledger path (`LEDGER_PATH`) is derived from `DATA_DIR` automatically.
 | Console | `/admin` | gated; redirects to `/login` when signed out |
 | API docs | `/docs` | public by default (toggle in Settings) |
 
-Tabs: **Overview** (request stats + device ledger), **Playground** (upload/URL/base64 image →
-generate → preview), **API Keys**, **Settings**, **Password**.
+Tabs: **Overview** (request stats, device pool, device ledger), **Playground**
+(upload/URL/base64 image → generate → preview), **API Keys**, **Settings**, **Password**.
+
+## Device pool
+
+Fingerprints are cheap and local, so the pool is intentionally simple: it is held in memory
+and the ledger is the only thing written to disk (and only when a fingerprint is actually
+used). On startup the pool adopts any of today's ledger fingerprints that still have
+credits, then tops itself up to the minimum.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `pool.target` | `16` | Preferred number of warm fingerprints |
+| `pool.min` | `8` | Never drop below this many (adopted/minted at boot) |
+| `pool.max` | `40` | Hard ceiling; also the concurrency limit |
+| `pool.reg_min_interval` | `3` | Minimum seconds between minting new fingerprints |
+| `pool.refill_interval` | `5` | Seconds between background refill ticks |
+| `pool.session_ttl` | `1500` | Seconds before an idle fingerprint is recycled |
+| `pool.acquire_timeout` | `120` | Seconds to wait for a free fingerprint before failing |
+| `devices.daily_limit` | `2` | Generations allowed per fingerprint ("free credits per device") |
+
+The background thread mints at most one fingerprint per tick and only when the pool is below
+`target`, so an idle instance costs almost nothing. Press **Refill** in the console (or call
+`POST /admin/api/pool/refill`) to top up immediately.
 
 ## API
 
@@ -108,6 +133,7 @@ Once complete the response includes `"video_url"`. Typical generation time is 60
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/models` | Model list (public) |
+| `GET` | `/v1/pool` | Device-pool snapshot (requires a key) |
 | `GET` | `/health` | Service + upstream health |
 
 When `require_api_key` is enabled, all `/v1` routes require a valid `sk-ig-…` key.

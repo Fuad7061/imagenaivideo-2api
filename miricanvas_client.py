@@ -31,9 +31,14 @@ def _save_ledger(d):
 def _today(): return time.strftime("%Y-%m-%d")
 
 
+def mint_device():
+    """生成设备指纹但暂不写账本（供设备池预热，按需落账以省 IO）。"""
+    return f"android-{uuid.uuid4().hex[:16]}"
+
+
 def new_device(reason="fresh"):
-    """生成新设备指纹。网关侧可把 device_id 绑定到代理出口 IP。"""
-    did = f"android-{uuid.uuid4().hex[:16]}"
+    """生成新设备指纹并立即记入本地账本。网关侧可把 device_id 绑定到代理出口 IP。"""
+    did = mint_device()
     with _lock:
         d = _load_ledger(); d[did] = {"created": _today(), "used": 0, "reason": reason}
         _save_ledger(d)

@@ -26,8 +26,22 @@ function renderStats(s, d) {
     `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
 }
 
+function renderPool(p) {
+  if (!p) return;
+  $('#pool-badge').textContent = `idle ${p.idle}/${p.target} · in-flight ${p.inflight} · credits ${p.credits}`;
+  const items = [
+    ['Ready', p.idle],
+    ['In flight', p.inflight],
+    ['Credits', p.credits],
+    ['Pool size', p.size + '/' + p.target],
+    ['Minted', p.minted],
+  ];
+  $('#pool-stats').innerHTML = items.map(([l, v]) =>
+    `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
+}
+
 function renderDevices(d) {
-  $('#pool-badge').textContent = `today ${d.today_devices} · used ${d.used_today}/${d.capacity_today} · left ${d.remaining_today}`;
+  $('#ledger-badge').textContent = `today ${d.today_devices} · used ${d.used_today}/${d.capacity_today} · left ${d.remaining_today}`;
   const rows = (d.devices || []).map(x => `<tr>
     <td class="mono">${esc(x.id)}</td>
     <td>${x.used}</td>
@@ -43,9 +57,18 @@ async function loadOverview() {
   CONFIG = j.config;
   $('#ver').textContent = 'v' + j.version;
   renderStats(j.stats, j.devices);
+  renderPool(j.pool);
   renderDevices(j.devices);
   if (CONFIG.must_change_password) toast('Please change the default password now', 'err');
 }
+
+$('#pool-refill').onclick = async () => {
+  const btn = $('#pool-refill');
+  btn.disabled = true;
+  try { const j = await api('/admin/api/pool/refill', { method: 'POST' }); renderPool(j.pool); toast('Pool refilled', 'ok'); }
+  catch (e) { toast(e.message, 'err'); }
+  finally { btn.disabled = false; }
+};
 
 $('#newdevice').onclick = async () => {
   try { const j = await api('/admin/api/devices/new', { method: 'POST' }); toast('New device ' + (j.device || ''), 'ok'); loadOverview(); }
@@ -168,8 +191,10 @@ $('#new-key').onclick = async () => {
 };
 
 /* ---- settings ---- */
-const FIELDS = ['devices.daily_limit', 'devices.submit_retries', 'upstream.host',
-  'upstream.timeout', 'upstream.poll_timeout', 'upstream.user_agent'];
+const FIELDS = ['devices.daily_limit', 'devices.submit_retries',
+  'pool.target', 'pool.min', 'pool.max', 'pool.reg_min_interval',
+  'pool.refill_interval', 'pool.session_ttl', 'pool.acquire_timeout',
+  'upstream.host', 'upstream.timeout', 'upstream.poll_timeout', 'upstream.user_agent'];
 
 function fillSettings() {
   if (!CONFIG) return;

@@ -51,8 +51,14 @@ def health(proxy=None):
 
 
 def new_device(reason="manual"):
-    """Force creation of a fresh device fingerprint."""
+    """Force creation of a fresh device fingerprint (persisted to the ledger)."""
     return _mc.new_device(reason)
+
+
+def mint_device():
+    """Return a fresh fingerprint without persisting it (used by the device pool)."""
+    fn = getattr(_mc, "mint_device", None)
+    return fn() if fn else _mc.new_device("pool")
 
 
 def ledger_summary():

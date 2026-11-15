@@ -72,6 +72,20 @@
   </div>
 
   <div class="card">
+    <h2>GET /v1/pool <span class="hint">device pool status</span></h2>
+    <p class="muted">Returns the current device-pool snapshot: ready and in-flight fingerprints, total credits and mint count. Requires an API key.</p>
+    <pre><code>{
+  "size": 16,
+  "idle": 15,
+  "inflight": 1,
+  "credits": 32,
+  "minted": 16,
+  "target": 16,
+  "devices": [{ "id": "android-…", "credits": 2, "state": "available" }]
+}</code></pre>
+  </div>
+
+  <div class="card">
     <h2>GET /v1/models <span class="hint">list models</span></h2>
     <p class="muted">Public — no API key required.</p>
     <pre><code>{
@@ -82,13 +96,14 @@
 
   <div class="card">
     <h2>GET /health <span class="hint">service status</span></h2>
-    <p class="muted">Public health probe with live stats and device-ledger capacity.</p>
+    <p class="muted">Public health probe with live stats, device-ledger capacity and device-pool status.</p>
     <pre><code>{
   "status": "ok",
   "requests": 12,
   "tasks_completed": 9,
   "errors": 1,
   "devices": { "today_devices": 5, "remaining_today": 1, "…": "…" },
+  "pool": { "idle": 15, "inflight": 1, "credits": 32, "target": 16, "…": "…" },
   "version": "2.0.0"
 }</code></pre>
   </div>

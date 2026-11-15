@@ -17,6 +17,15 @@ DEFAULTS = {
         "daily_limit": 2,
         "submit_retries": 5,
     },
+    "pool": {
+        "target": 16,
+        "min": 8,
+        "max": 40,
+        "reg_min_interval": 3,
+        "refill_interval": 5,
+        "session_ttl": 1500,
+        "acquire_timeout": 120,
+    },
     "upstream": {
         "host": "api.imagenai.online",
         "timeout": 60,
@@ -36,6 +45,13 @@ EDITABLE = {
     "docs_public": bool,
     "devices.daily_limit": int,
     "devices.submit_retries": int,
+    "pool.target": int,
+    "pool.min": int,
+    "pool.max": int,
+    "pool.reg_min_interval": float,
+    "pool.refill_interval": float,
+    "pool.session_ttl": int,
+    "pool.acquire_timeout": int,
     "upstream.host": str,
     "upstream.timeout": int,
     "upstream.poll_timeout": int,
@@ -129,7 +145,7 @@ class Config:
                 target = (section, leaf)
             try:
                 val = caster(raw)
-                if caster is int and val < 0:
+                if caster in (int, float) and val < 0:
                     raise ValueError("must be >= 0")
                 self.set(*target, value=val)
                 applied.append(dotted)

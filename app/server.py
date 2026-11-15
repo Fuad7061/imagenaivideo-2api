@@ -34,6 +34,7 @@ from .security import (  # noqa: E402
 )
 from . import upstream  # noqa: E402
 from .upstream import UpstreamError  # noqa: E402
+from .pool import DevicePool, PoolEmpty  # noqa: E402
 
 WEB_DIR = Path(__file__).parent / "web"
 MAX_BODY = 16 * 1024 * 1024  # base64 images can be large
@@ -108,6 +109,8 @@ class App:
         self.stats = Stats()
         self.tasks = {}
         self.tasks_lock = threading.Lock()
+        self.pool = DevicePool(self.config, upstream)
+        self.pool.start()
         self.static = self._load_static()
 
     def _load_static(self):
@@ -131,10 +134,17 @@ class App:
 
         self.stats.inc("requests")
         try:
-            result = upstream.submit(image_b64, prompt)
+            device_id = self.pool.acquire()
+        except PoolEmpty as e:
+            self.stats.inc("errors")
+            raise UpstreamError(str(e))
+        try:
+            result = upstream.submit(image_b64, prompt, device_id=device_id)
         except Exception:
+            self.pool.release(device_id, used=False)
             self.stats.inc("errors")
             raise
+        self.pool.release(device_id, used=True)
         tid = os.urandom(16).hex()
         task = {
             "id": tid,
@@ -263,14 +273,21 @@ class Handler(BaseHTTPRequestHandler):
                 out[k.strip()] = v.strip()
         return out
 
-    def _body(self):
+    def _read_raw(self):
+        """Read the request body exactly once so HTTP/1.1 keep-alive stays in sync."""
+        if getattr(self, "_raw", None) is not None:
+            return self._raw
+        self._raw = b""
         try:
             length = int(self.headers.get("Content-Length", 0))
         except ValueError:
-            return {}
-        if length <= 0 or length > MAX_BODY:
-            return {}
-        raw = self.rfile.read(length)
+            length = 0
+        if 0 < length <= MAX_BODY:
+            self._raw = self.rfile.read(length)
+        return self._raw
+
+    def _body(self):
+        raw = self._read_raw()
         if not raw:
             return {}
         try:
@@ -316,9 +333,11 @@ class Handler(BaseHTTPRequestHandler):
         self._send(204, b"", "text/plain", {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Authorization, Content-Type, x-api-key", "Access-Control-Allow-Methods": "GET, POST, OPTIONS"})
 
     def _dispatch(self, method):
+        self._raw = None
         parts = urlsplit(self.path)
         path = parts.path.rstrip("/") or "/"
         query = parse_qs(parts.query)
+        self._read_raw()
         try:
             if path.startswith("/admin/api"):
                 return self._admin_api(method, path, query)
@@ -354,7 +373,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._redirect("/login")
         if path == "/health":
             snap = self.app.stats.snapshot()
-            return self._json(200, {"status": "ok", **snap, "devices": upstream.ledger_summary(), "version": __version__})
+            return self._json(200, {"status": "ok", **snap, "devices": upstream.ledger_summary(), "pool": self.app.pool.snapshot(), "version": __version__})
         if path.startswith("/assets/"):
             return self._static(path.rsplit("/", 1)[-1])
         if path == "/favicon.ico":
@@ -368,6 +387,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"object": "list", "data": [{"id": MODEL, "object": "model", "owned_by": "imagenai-2api"}]}, cors)
         if not self._api_ok():
             return self._json(401, {"error": {"message": "Invalid API key", "type": "invalid_request_error", "code": "invalid_api_key"}}, cors)
+        if path == "/v1/pool" and method == "GET":
+            return self._json(200, self.app.pool.snapshot(), cors)
         if path == "/v1/video/generations" and method == "POST":
             try:
                 return self._json(200, self.app.submit_task(self._body()), cors)
@@ -398,7 +419,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._is_admin():
             return self._json(401, {"error": "unauthorized"})
         if sub == "/config" and method == "GET":
-            return self._json(200, {"config": self.app.config.snapshot(), "stats": self.app.stats.snapshot(), "devices": upstream.ledger_summary(), "version": __version__})
+            return self._json(200, {"config": self.app.config.snapshot(), "stats": self.app.stats.snapshot(), "devices": upstream.ledger_summary(), "pool": self.app.pool.snapshot(), "version": __version__})
         if sub == "/config" and method == "PUT":
             applied, errors = self.app.config.apply_settings(self._body())
             upstream.configure(self.app.config)
@@ -427,6 +448,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._update_key()
         if sub == "/keys/delete" and method == "POST":
             return self._delete_key()
+        if sub == "/pool" and method == "GET":
+            return self._json(200, self.app.pool.snapshot())
+        if sub == "/pool/refill" and method == "POST":
+            return self._json(200, {"ok": True, "pool": self.app.pool.refill()})
         if sub == "/devices" and method == "GET":
             return self._json(200, upstream.ledger_summary())
         if sub == "/devices/new" and method == "POST":
@@ -436,7 +461,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 return self._json(500, {"error": str(e)})
         if sub == "/stats" and method == "GET":
-            return self._json(200, {"stats": self.app.stats.snapshot(), "devices": upstream.ledger_summary()})
+            return self._json(200, {"stats": self.app.stats.snapshot(), "devices": upstream.ledger_summary(), "pool": self.app.pool.snapshot()})
         return self._json(404, {"error": "not found"})
 
     def _login(self):
